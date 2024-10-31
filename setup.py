@@ -1,25 +1,23 @@
 import sys
 
-min_version, max_version = ((3, 8), "3.8"), ((3, 11), "3.11")
-
-if not (min_version[0] <= sys.version_info[:2] <= max_version[0]):
+if sys.version_info < (3, 6) or sys.version_info >= (3, 9):
     # Python 3.5 does not support f-strings
     py_version = ".".join([str(v) for v in sys.version_info[:3]])
     error = (
         "\n----------------------------------------\n"
-        "Error: Vivarium runs under python {min_version}-{max_version}.\n"
-        "You are running python {py_version}".format(
-            min_version=min_version[1], max_version=max_version[1], py_version=py_version
-        )
+        "Error: Vivarium runs under python 3.6-3.8.\n"
+        "You are running python {py_version}".format(py_version=py_version)
     )
     print(error, file=sys.stderr)
     sys.exit(1)
+
 
 from pathlib import Path
 
 from setuptools import find_packages, setup
 
 if __name__ == "__main__":
+
     base_dir = Path(__file__).parent
     src_dir = base_dir / "src"
 
@@ -31,8 +29,7 @@ if __name__ == "__main__":
         long_description = f.read()
 
     install_requirements = [
-        "layered_config_tree>=1.0.2",
-        "numpy<2.0.0",
+        "numpy",
         "pandas",
         "pyyaml>=5.1",
         "scipy",
@@ -40,14 +37,7 @@ if __name__ == "__main__":
         "tables",
         "networkx",
         "loguru",
-        "pyarrow",
-        "dill",
-        # Type stubs
-        "pandas-stubs",
-        "networkx-stubs",
     ]
-
-    setup_requires = ["setuptools_scm"]
 
     interactive_requirements = [
         "IPython",
@@ -57,28 +47,20 @@ if __name__ == "__main__":
 
     test_requirements = [
         "pytest",
-        "pytest-cov",
         "pytest-mock",
     ]
 
-    lint_requirements = [
-        "black==22.3.0",
-        "isort",
-        "mypy",
-    ]
-
     doc_requirements = [
-        "sphinx>=4.0,<8.0.0",
-        "sphinx-rtd-theme>=0.6",
+        "sphinx>=4.0",
+        "sphinx-rtd-theme",
         "sphinx-click",
         "IPython",
         "matplotlib",
-        "sphinxcontrib-video",
-        "sphinx-autodoc-typehints",
     ]
 
     setup(
         name=about["__title__"],
+        version=about["__version__"],
         description=about["__summary__"],
         long_description=long_description,
         license=about["__license__"],
@@ -115,20 +97,11 @@ if __name__ == "__main__":
             "docs": doc_requirements,
             "test": test_requirements,
             "interactive": interactive_requirements,
-            "dev": doc_requirements
-            + test_requirements
-            + lint_requirements
-            + interactive_requirements,
+            "dev": doc_requirements + test_requirements + interactive_requirements,
         },
         entry_points="""
                 [console_scripts]
                 simulate=vivarium.interface.cli:simulate
             """,
         zip_safe=False,
-        use_scm_version={
-            "write_to": "src/vivarium/_version.py",
-            "write_to_template": '__version__ = "{version}"\n',
-            "tag_regex": r"^(?P<prefix>v)?(?P<version>[^\+]+)(?P<suffix>.*)?$",
-        },
-        setup_requires=setup_requires,
     )

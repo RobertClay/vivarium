@@ -1,6 +1,5 @@
 import pytest
 
-from tests.helpers import MockComponentA
 from vivarium.framework.components import ComponentConfigurationParser
 from vivarium.framework.plugins import (
     DEFAULT_PLUGINS,
@@ -8,6 +7,8 @@ from vivarium.framework.plugins import (
     PluginManager,
 )
 from vivarium.framework.time import DateTimeClock, TimeInterface
+
+from .components.mocks import MockComponentA
 
 plugin_config = {"george": {"controller": "big_brother", "builder_interface": "minipax"}}
 
@@ -71,27 +72,27 @@ def test_PluginManager__get_fail(test_plugin_manager, mocker):
 def test_PluginManager__get(test_plugin_manager):
     time_components = test_plugin_manager._get("clock")
 
-    assert isinstance(time_components.controller, DateTimeClock)
-    assert isinstance(time_components.builder_interface, TimeInterface)
+    assert isinstance(time_components["controller"], DateTimeClock)
+    assert isinstance(time_components["builder_interface"], TimeInterface)
 
     parser_components = test_plugin_manager._get("component_configuration_parser")
 
-    assert isinstance(parser_components.controller, ComponentConfigurationParser)
-    assert parser_components.builder_interface is None
+    assert isinstance(parser_components["controller"], ComponentConfigurationParser)
+    assert parser_components["builder_interface"] is None
 
 
 def test_PluginManager_get_plugin(test_plugin_manager):
     assert test_plugin_manager._plugins == {}
     clock = test_plugin_manager.get_plugin("clock")
     assert isinstance(clock, DateTimeClock)
-    assert test_plugin_manager._plugins["clock"].controller is clock
+    assert test_plugin_manager._plugins["clock"]["controller"] is clock
 
 
 def test_PluginManager_get_plugin_interface(test_plugin_manager):
     assert test_plugin_manager._plugins == {}
     clock_interface = test_plugin_manager.get_plugin_interface("clock")
     assert isinstance(clock_interface, TimeInterface)
-    assert test_plugin_manager._plugins["clock"].builder_interface is clock_interface
+    assert test_plugin_manager._plugins["clock"]["builder_interface"] is clock_interface
 
 
 def test_PluginManager_get_optional_controllers(test_plugin_manager, mocker):

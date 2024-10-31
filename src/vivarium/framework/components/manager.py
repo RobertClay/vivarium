@@ -1,4 +1,3 @@
-# mypy: ignore-errors
 """
 ============================
 The Component Manager System
@@ -16,22 +15,14 @@ and managers and components are given to it by the context. It is called on to
 setup everything it holds when the context itself is setup.
 
 """
-
 import inspect
-from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Sequence, Tuple, Union
+import typing
+from typing import Any, Dict, Iterator, List, Tuple, Type, Union
 
-from layered_config_tree import (
-    ConfigurationError,
-    DuplicatedConfigurationError,
-    LayeredConfigTree,
-)
-
-from vivarium import Component
+from vivarium.config_tree import ConfigurationError, DuplicatedConfigurationError
 from vivarium.exceptions import VivariumError
-from vivarium.framework.lifecycle import LifeCycleManager
-from vivarium.manager import Interface, Manager
 
-if TYPE_CHECKING:
+if typing.TYPE_CHECKING:
     from vivarium.framework.engine import Builder
 
 
@@ -49,35 +40,32 @@ class OrderedComponentSet:
 
     """
 
-    def __init__(self, *args: Union[Component, Manager]):
-        self.components: List[Union[Component, Manager]] = []
+    def __init__(self, *args):
+        self.components = []
         if args:
             self.update(args)
 
-    def add(self, component: Component) -> None:
+    def add(self, component: Any):
         if component in self:
             raise ComponentConfigError(
                 f"Attempting to add a component with duplicate name: {component}"
             )
         self.components.append(component)
 
-    def update(
-        self,
-        components: Union[List[Union[Component, Manager]], Tuple[Union[Component, Manager]]],
-    ) -> None:
+    def update(self, components: Union[List[Any], Tuple[Any]]):
         for c in components:
             self.add(c)
 
-    def pop(self) -> Union[Component, Manager]:
+    def pop(self) -> Any:
         component = self.components.pop(0)
         return component
 
-    def __contains__(self, component: Union[Component, Manager]) -> bool:
+    def __contains__(self, component: Any) -> bool:
         if not hasattr(component, "name"):
             raise ComponentConfigError(f"Component {component} has no name attribute")
         return component.name in [c.name for c in self.components]
 
-    def __iter__(self) -> Iterator[Union[Component, Manager]]:
+    def __iter__(self) -> Iterator:
         return iter(self.components)
 
     def __len__(self) -> int:
@@ -104,8 +92,9 @@ class OrderedComponentSet:
         return f"OrderedComponentSet({[c.name for c in self.components]})"
 
 
-class ComponentManager(Manager):
+class ComponentManager:
     """Manages the initialization and setup of :mod:`vivarium` components.
+
 
     Maintains references to all components and managers in a :mod:`vivarium`
     simulation, applies their default configuration and initiates their
@@ -131,9 +120,7 @@ class ComponentManager(Manager):
         """The name of this component."""
         return "component_manager"
 
-    def setup(
-        self, configuration: LayeredConfigTree, lifecycle_manager: LifeCycleManager
-    ) -> None:
+    def setup(self, configuration, lifecycle_manager):
         """Called by the simulation context."""
         self.configuration = configuration
         self.lifecycle = lifecycle_manager
@@ -149,7 +136,7 @@ class ComponentManager(Manager):
             self.list_components, restrict_during=["initialization"]
         )
 
-    def add_managers(self, managers: Union[List[Manager], Tuple[Manager]]) -> None:
+    def add_managers(self, managers: Union[List[Any], Tuple[Any]]):
         """Registers new managers with the component manager.
 
         Managers are configured and setup before components.
@@ -158,12 +145,13 @@ class ComponentManager(Manager):
         ----------
         managers
             Instantiated managers to register.
+
         """
-        for m in self._flatten(list(managers)):
+        for m in self._flatten(managers):
             self.apply_configuration_defaults(m)
             self._managers.add(m)
 
-    def add_components(self, components: Union[List[Component], Tuple[Component]]) -> None:
+    def add_components(self, components: Union[List[Any], Tuple[Any]]):
         """Register new components with the component manager.
 
         Components are configured and setup after managers.
@@ -172,14 +160,15 @@ class ComponentManager(Manager):
         ----------
         components
             Instantiated components to register.
+
         """
-        for c in self._flatten(list(components)):
+        for c in self._flatten(components):
             self.apply_configuration_defaults(c)
             self._components.add(c)
 
     def get_components_by_type(
-        self, component_type: Union[type, Sequence[type]]
-    ) -> List[Component]:
+        self, component_type: Union[type, Tuple[type, ...]]
+    ) -> List[Any]:
         """Get all components that are an instance of ``component_type``.
 
         Parameters
@@ -189,12 +178,13 @@ class ComponentManager(Manager):
 
         Returns
         -------
+        List[Any]
             A list of components of type ``component_type``.
-        """
-        # Convert component_type to a tuple for isinstance
-        return [c for c in self._components if isinstance(c, tuple(component_type))]
 
-    def get_component(self, name: str) -> Component:
+        """
+        return [c for c in self._components if isinstance(c, component_type)]
+
+    def get_component(self, name: str) -> Any:
         """Get the component with name ``name``.
 
         Names are guaranteed to be unique.
@@ -206,29 +196,32 @@ class ComponentManager(Manager):
 
         Returns
         -------
+        Any
             A component that has name ``name``.
 
         Raises
         ------
         ValueError
             No component exists in the component manager with ``name``.
+
         """
         for c in self._components:
             if c.name == name:
                 return c
         raise ValueError(f"No component found with name {name}")
 
-    def list_components(self) -> Dict[str, Component]:
+    def list_components(self) -> Dict[str, Any]:
         """Get a mapping of component names to components held by the manager.
 
         Returns
         -------
+        Dict[str, Any]
             A mapping of component names to components.
 
         """
         return {c.name: c for c in self._components}
 
-    def setup_components(self, builder: "Builder") -> None:
+    def setup_components(self, builder: "Builder"):
         """Separately configure and set up the managers and components held by
         the component manager, in that order.
 
@@ -241,10 +234,13 @@ class ComponentManager(Manager):
         ----------
         builder
             Interface to several simulation tools.
+
         """
         self._setup_components(builder, self._managers + self._components)
 
-    def apply_configuration_defaults(self, component: Union[Component, Manager]) -> None:
+    def apply_configuration_defaults(self, component: Any):
+        if not hasattr(component, "configuration_defaults"):
+            return
         try:
             self.configuration.update(
                 component.configuration_defaults,
@@ -271,7 +267,7 @@ class ComponentManager(Manager):
             )
 
     @staticmethod
-    def _get_file(component: Union[Component, Manager]) -> str:
+    def _get_file(component):
         if component.__module__ == "__main__":
             # This is defined directly in a script or notebook so there's no
             # file to attribute it to.
@@ -280,51 +276,41 @@ class ComponentManager(Manager):
             return inspect.getfile(component.__class__)
 
     @staticmethod
-    def _flatten(
-        components: List[Union[Component, Manager]]
-    ) -> List[Union[Component, Manager]]:
+    def _flatten(components: List):
         out = []
         components = components[::-1]
         while components:
             current = components.pop()
             if isinstance(current, (list, tuple)):
                 components.extend(current[::-1])
-            elif isinstance(current, Component):
-                components.extend(current.sub_components[::-1])
-                out.append(current)
-            elif isinstance(current, Manager):
-                out.append(current)
             else:
-                raise TypeError(
-                    "Expected Component, Manager, List, or Tuple. "
-                    f"Got {type(current)}: {current}"
-                )
+                if hasattr(current, "sub_components"):
+                    components.extend(current.sub_components[::-1])
+                out.append(current)
         return out
 
     @staticmethod
     def _setup_components(builder: "Builder", components: OrderedComponentSet):
-        for component in components:
-            if isinstance(component, Component):
-                component.setup_component(builder)
-            elif isinstance(component, Manager):
-                component.setup(builder)
+        for c in components:
+            if hasattr(c, "setup"):
+                c.setup(builder)
 
     def __repr__(self):
         return "ComponentManager()"
 
 
-class ComponentInterface(Interface):
-    """The builder interface for the component manager system.
+class ComponentInterface:
+    """The builder interface for the component manager system. This class
+    defines component manager methods a ``vivarium`` component can access from
+    the builder. It provides methods for querying and adding components to the
+    :class:`ComponentManager`.
 
-    This class defines component manager methods a ``vivarium`` component can
-    access from the builder. It provides methods for querying and adding components
-    to the :class:`ComponentManager`.
     """
 
     def __init__(self, manager: ComponentManager):
         self._manager = manager
 
-    def get_component(self, name: str) -> Component:
+    def get_component(self, name: str) -> Any:
         """Get the component that has ``name`` if presently held by the component
         manager. Names are guaranteed to be unique.
 
@@ -332,16 +318,16 @@ class ComponentInterface(Interface):
         ----------
         name
             A component name.
-
         Returns
         -------
             A component that has name ``name``.
+
         """
         return self._manager.get_component(name)
 
     def get_components_by_type(
-        self, component_type: Union[type, Sequence[type]]
-    ) -> List[Component]:
+        self, component_type: Union[type, Tuple[type, ...]]
+    ) -> List[Any]:
         """Get all components that are an instance of ``component_type``.
 
         Parameters
@@ -352,15 +338,19 @@ class ComponentInterface(Interface):
 
         Returns
         -------
+        List[Any]
             A list of components of type ``component_type``.
+
         """
         return self._manager.get_components_by_type(component_type)
 
-    def list_components(self) -> Dict[str, Component]:
+    def list_components(self) -> Dict[str, Any]:
         """Get a mapping of component names to components held by the manager.
 
         Returns
         -------
+        Dict[str, Any]
             A dictionary mapping component names to components.
+
         """
         return self._manager.list_components()

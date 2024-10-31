@@ -1,47 +1,35 @@
-# mypy: ignore-errors
-from typing import Any, Dict, List
-
 import pandas as pd
 
-from vivarium import Component
 from vivarium.framework.engine import Builder
 from vivarium.framework.event import Event
 from vivarium.framework.population import SimulantData
 
 
-class BasePopulation(Component):
-    """Generates a base population with a uniform distribution of age and sex."""
+class BasePopulation:
+    """Generates a base population with a uniform distribution of age and sex.
 
-    ##############
-    # Properties #
-    ##############
+    Attributes
+    ----------
+    configuration_defaults :
+        A set of default configuration values for this component. These can be
+        overwritten in the simulation model specification or by providing
+        override values when constructing an interactive simulation.
+    """
 
-    @property
-    def configuration_defaults(self) -> Dict[str, Any]:
-        """A set of default configuration values for this component.
+    configuration_defaults = {
+        "population": {
+            # The range of ages to be generated in the initial population
+            "age_start": 0,
+            "age_end": 100,
+            # Note: There is also a 'population_size' key.
+        },
+    }
 
-        These can be overwritten in the simulation model specification or by
-        providing override values when constructing an interactive simulation.
-        """
-        return {
-            "population": {
-                # The range of ages to be generated in the initial population
-                "age_start": 0,
-                "age_end": 100,
-                # Note: There is also a 'population_size' key.
-            },
-        }
-
-    @property
-    def columns_created(self) -> List[str]:
-        return ["age", "sex", "alive", "entrance_time"]
-
-    #####################
-    # Lifecycle methods #
-    #####################
+    def __init__(self):
+        self.name = "base_population"
 
     # noinspection PyAttributeOutsideInit
-    def setup(self, builder: Builder) -> None:
+    def setup(self, builder: Builder):
         """Performs this component's simulation setup.
 
         The ``setup`` method is automatically called by the simulation
@@ -50,7 +38,7 @@ class BasePopulation(Component):
 
         Parameters
         ----------
-        builder
+        builder :
             Access to simulation tools and subsystems.
         """
         self.config = builder.configuration
@@ -67,42 +55,47 @@ class BasePopulation(Component):
             )
 
         self.age_randomness = builder.randomness.get_stream(
-            "age_initialization", initializes_crn_attributes=self.with_common_random_numbers
+            "age_initialization", for_initialization=self.with_common_random_numbers
         )
         self.sex_randomness = builder.randomness.get_stream("sex_initialization")
 
-    ########################
-    # Event-driven methods #
-    ########################
+        columns_created = ["age", "sex", "alive", "entrance_time"]
+        builder.population.initializes_simulants(
+            self.on_initialize_simulants, creates_columns=columns_created
+        )
 
-    def on_initialize_simulants(self, pop_data: SimulantData) -> None:
+        self.population_view = builder.population.get_view(columns_created)
+
+        builder.event.register_listener("time_step", self.age_simulants)
+
+    def on_initialize_simulants(self, pop_data: SimulantData):
         """Called by the simulation whenever new simulants are added.
 
         This component is responsible for creating and filling four columns
         in the population state table:
 
-        'age'
+        'age' :
             The age of the simulant in fractional years.
-        'sex'
+        'sex' :
             The sex of the simulant. One of {'Male', 'Female'}
-        'alive'
+        'alive' :
             Whether or not the simulant is alive. One of {'alive', 'dead'}
-        'entrance_time'
+        'entrance_time' :
             The time that the simulant entered the simulation. The 'birthday'
             for simulants that enter as newborns. A `pandas.Timestamp`.
 
         Parameters
         ----------
-        pop_data
+        pop_data :
             A record containing the index of the new simulants, the
             start of the time step the simulants are added on, the width
             of the time step, and the age boundaries for the simulants to
             generate.
+
         """
 
-        age_start = pop_data.user_data.get("age_start", self.config.population.age_start)
-        age_end = pop_data.user_data.get("age_end", self.config.population.age_end)
-
+        age_start = self.config.population.age_start
+        age_end = self.config.population.age_end
         if age_start == age_end:
             age_window = pop_data.creation_window / pd.Timedelta(days=365)
         else:
@@ -132,12 +125,12 @@ class BasePopulation(Component):
 
         self.population_view.update(population)
 
-    def on_time_step(self, event: Event) -> None:
+    def age_simulants(self, event: Event):
         """Updates simulant age on every time step.
 
         Parameters
         ----------
-        event
+        event :
             An event object emitted by the simulation containing an index
             representing the simulants affected by the event and timing
             information.

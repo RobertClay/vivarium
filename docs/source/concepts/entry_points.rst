@@ -40,7 +40,7 @@ model_specification
   :class:`SimulationContext <vivarium.framework.engine.SimulationContext>`, it
   can be provided as a path to a file (either as a :class:`str` or a
   :class:`pathlib.Path`) or as a
-  :class:`LayeredConfigTree <layered_config_tree.main.LayeredConfigTree>`, the internal
+  :class:`ConfigTree <vivarium.config_tree.ConfigTree>`, the internal
   representation of configuration information used by :mod:`vivarium`. The
   model specification contains three pieces, each represented by the next
   three arguments. For more information about model specifications and their
@@ -52,7 +52,7 @@ components
   the framework via the :ref:`builder <builder_concept>`. Components may be
   provided to the context as a list of instantiated objects, as a dictionary
   representation of their import paths, or as a
-  :class:`LayeredConfigTree <layered_config_tree.main.LayeredConfigTree>`
+  :class:`ConfigTree <vivarium.config_tree.ConfigTree>`
   representation of their import paths. The latter two representations are
   treated as prefix trees when they are parsed into objects. This behavior
   is controlled by the
@@ -63,7 +63,7 @@ configuration
   The :term:`configuration <Configuration>` is the set of
   variable model parameters in a :mod:`vivarium` simulation.  It may be
   provided as a dictionary or
-  :class:`LayeredConfigTree <layered_config_tree.main.LayeredConfigTree>` representation. See
+  :class:`ConfigTree <vivarium.config_tree.ConfigTree>` representation. See
   the :ref:`concept note <configuration_concept>` for more information.
 plugins
   :term:`Plugins <Plugin>` represent core functionality and
@@ -71,7 +71,7 @@ plugins
   functionality of the framework by writing their own plugins.  The framework
   then needs to be notified of their names and where they are located. Plugins
   may be specified as either a dictionary or
-  :class:`LayeredConfigTree <layered_config_tree.main.LayeredConfigTree>` and are
+  :class:`ConfigTree <vivarium.config_tree.ConfigTree>` and are
   parsed into objects by the
   :class:`PluginManager <vivarium.framework.plugins.PluginManager>`.
   This is an advanced feature and almost never necessary.
@@ -83,15 +83,15 @@ modification of a simulation defined in a model specification file.
 .. warning::
 
    If you provide ``components`` as a :class:`dict` or
-   :class:`LayeredConfigTree <layered_config_tree.main.LayeredConfigTree>`,
+   :class:`ConfigTree <vivarium.config_tree.ConfigTree>`,
    these will also be treated as overrides, though this is almost never the
    intended use case, so tread cautiously.
 
 By intention, the context exposes a very simple interface for managing the
-:ref:`simulation lifecycle <lifecycle_concept>`.  Once a context is instantiated,
-all steps of running a simulation are encapsulated in the
-:func:`run_simulation <vivarium.framework.engine.SimulationContext.run_simulation>`
-method.
+:ref:`simulation lifecycle <lifecycle_concept>`.  The combination of
+initializing and running the simulation is encapsulated in the
+:func:`run_simulation <vivarium.framework.engine.run_simulation>` command
+also available in the :mod:`engine <vivarium.framework.engine>`.
 
 The simulation :class:`Builder <vivarium.framework.engine.Builder>` is also
 part of the engine. It is the main interface that components use to interact

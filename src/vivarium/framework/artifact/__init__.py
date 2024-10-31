@@ -1,6 +1,6 @@
-from vivarium.framework.artifact.artifact import Artifact, ArtifactException
-from vivarium.framework.artifact.hdf import EntityKey
-from vivarium.framework.artifact.manager import (
+from .artifact import Artifact, ArtifactException
+from .hdf import EntityKey
+from .manager import (
     ArtifactInterface,
     ArtifactManager,
     filter_data,

@@ -1,4 +1,3 @@
-# mypy: ignore-errors
 """
 ====================
 The Artifact Manager
@@ -8,24 +7,23 @@ This module contains the :class:`ArtifactManager`, a ``vivarium`` plugin
 for handling complex data bound up in a data artifact.
 
 """
-
 import re
 from pathlib import Path
-from typing import Any, Callable, List, Optional, Sequence, Union
+from typing import Any, Sequence, Union
 
 import pandas as pd
-from layered_config_tree.main import LayeredConfigTree
+from loguru import logger
 
+from vivarium.config_tree import ConfigTree
 from vivarium.framework.artifact.artifact import Artifact
-from vivarium.manager import Interface, Manager
 
 _Filter = Union[str, int, Sequence[int], Sequence[str]]
 
 
-class ArtifactManager(Manager):
+class ArtifactManager:
     """The controller plugin component for managing a data artifact."""
 
-    CONFIGURATION_DEFAULTS = {
+    configuration_defaults = {
         "input_data": {
             "artifact_path": None,
             "artifact_filter_term": None,
@@ -33,16 +31,12 @@ class ArtifactManager(Manager):
         }
     }
 
-    def __init__(self):
-        self._default_value_column = "value"
-
     @property
     def name(self):
         return "artifact_manager"
 
     def setup(self, builder):
         """Performs this component's simulation setup."""
-        self.logger = builder.logging.get_logger(self.name)
         # because not all columns are accessible via artifact filter terms, apply config filters separately
         self.config_filter_term = validate_filter_term(
             builder.configuration.input_data.artifact_filter_term
@@ -50,17 +44,15 @@ class ArtifactManager(Manager):
         self.artifact = self._load_artifact(builder.configuration)
         builder.lifecycle.add_constraint(self.load, allow_during=["setup"])
 
-    def _load_artifact(self, configuration: LayeredConfigTree) -> Optional[Artifact]:
-        """Loads artifact data.
-
-        Looks up the path to the artifact hdf file, builds a default filter,
+    def _load_artifact(self, configuration: ConfigTree) -> Union[Artifact, None]:
+        """Looks up the path to the artifact hdf file, builds a default filter,
         and generates the data artifact. Stores any configuration specified filter
         terms separately to be applied on loading, because not all columns are
         available via artifact filter terms.
 
         Parameters
         ----------
-        configuration
+        configuration :
             Configuration block of the model specification containing the input data parameters.
 
         Returns
@@ -71,9 +63,9 @@ class ArtifactManager(Manager):
             return None
         artifact_path = parse_artifact_path_config(configuration)
         base_filter_terms = get_base_filter_terms(configuration)
-        self.logger.info(f"Running simulation from artifact located at {artifact_path}.")
-        self.logger.info(f"Artifact base filter terms are {base_filter_terms}.")
-        self.logger.info(f"Artifact additional filter terms are {self.config_filter_term}.")
+        logger.debug(f"Running simulation from artifact located at {artifact_path}.")
+        logger.debug(f"Artifact base filter terms are {base_filter_terms}.")
+        logger.debug(f"Artifact additional filter terms are {self.config_filter_term}.")
         return Artifact(artifact_path, base_filter_terms)
 
     def load(self, entity_key: str, **column_filters: _Filter) -> Any:
@@ -90,6 +82,7 @@ class ArtifactManager(Manager):
 
         Returns
         -------
+        Any
             The data associated with the given key, filtered down to the
             requested subset if the data is a dataframe.
         """
@@ -98,39 +91,24 @@ class ArtifactManager(Manager):
             data = data.reset_index()
             draw_col = [c for c in data if "draw" in c]
             if draw_col:
-                data = data.rename(columns={draw_col[0]: self._default_value_column})
+                data = data.rename(columns={draw_col[0]: "value"})
         return (
             filter_data(data, self.config_filter_term, **column_filters)
             if isinstance(data, pd.DataFrame)
             else data
         )
 
-    def value_columns(self) -> Callable[[Union[str, pd.DataFrame]], List[str]]:
-        """Returns a function that returns the value columns for the given input.
-
-        The function can be called with either a string or a pandas DataFrame.
-        If a string is provided, it is interpreted as an artifact key, and the
-        value columns for the data stored at that key are returned.
-
-        Currently, the returned function will always return ["value"].
-
-        Returns
-        -------
-            A function that returns the value columns for the given input.
-        """
-        return lambda _: [self._default_value_column]
-
     def __repr__(self):
         return "ArtifactManager()"
 
 
-class ArtifactInterface(Interface):
+class ArtifactInterface:
     """The builder interface for accessing a data artifact."""
 
-    def __init__(self, manager: ArtifactManager):
+    def __init__(self, manager):
         self._manager = manager
 
-    def load(self, entity_key: str, **column_filters: _Filter) -> pd.DataFrame:
+    def load(self, entity_key: str, **column_filters: Union[_Filter]) -> pd.DataFrame:
         """Loads data associated with a formatted entity key.
 
         The provided entity key must be of the form
@@ -158,29 +136,17 @@ class ArtifactInterface(Interface):
 
         Returns
         -------
+        pandas.DataFrame
             The data associated with the given key filtered down to the requested subset.
         """
         return self._manager.load(entity_key, **column_filters)
-
-    def value_columns(self) -> Callable[[Union[str, pd.DataFrame]], List[str]]:
-        """Returns a function that returns the value columns for the given input.
-
-        The function can be called with either a string or a pandas DataFrame.
-        If a string is provided, it is interpreted as an artifact key, and the
-        value columns for the data stored at that key are returned.
-
-        Returns
-        -------
-            A function that returns the value columns for the given input.
-        """
-        return self._manager.value_columns()
 
     def __repr__(self):
         return "ArtifactManagerInterface()"
 
 
 def filter_data(
-    data: pd.DataFrame, config_filter_term: Optional[str] = None, **column_filters: _Filter
+    data: pd.DataFrame, config_filter_term: str = None, **column_filters: _Filter
 ) -> pd.DataFrame:
     """Uses the provided column filters and age_group conditions to subset the raw data."""
     data = _config_filter(data, config_filter_term)
@@ -237,7 +203,7 @@ def _subset_columns(data: pd.DataFrame, **column_filters) -> pd.DataFrame:
     return data.drop(columns=columns_to_remove)
 
 
-def get_base_filter_terms(configuration: LayeredConfigTree):
+def get_base_filter_terms(configuration: ConfigTree):
     """Parses default filter terms from the artifact configuration."""
     base_filter_terms = []
 
@@ -248,7 +214,7 @@ def get_base_filter_terms(configuration: LayeredConfigTree):
     return base_filter_terms
 
 
-def parse_artifact_path_config(config: LayeredConfigTree) -> str:
+def parse_artifact_path_config(config: ConfigTree) -> str:
     """Gets the path to the data artifact from the simulation configuration.
 
     The path specified in the configuration may be absolute or it may be relative
@@ -261,11 +227,13 @@ def parse_artifact_path_config(config: LayeredConfigTree) -> str:
 
     Returns
     -------
+    str
         The path to the data artifact.
     """
     path = Path(config.input_data.artifact_path)
 
     if not path.is_absolute():
+
         path_config = config.input_data.metadata("artifact_path")[-1]
         if path_config["source"] is None:
             raise ValueError("Insufficient information provided to find artifact.")

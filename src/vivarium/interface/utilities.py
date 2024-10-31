@@ -1,4 +1,3 @@
-# mypy: ignore-errors
 """
 ===========================
 Interface Utility Functions
@@ -8,13 +7,12 @@ The functions defined here are used to support the interactive and command-line
 interfaces for ``vivarium``.
 
 """
-
 import functools
+import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Union
 
-import yaml
+from loguru import logger
 
 from vivarium.exceptions import VivariumError
 
@@ -107,56 +105,34 @@ def raise_if_not_setup(system_type):
     return method_wrapper
 
 
-def get_output_model_name_string(
-    artifact_path: Union[str, Path],
-    model_spec_path: Union[str, Path],
-) -> str:
-    """Find a good string to use as model name in output path creation.
-
-    Parameters
-    ----------
-    artifact_path
-        Path to the artifact file, if exists, else should be None
-    model_spec_path
-        Path to the model specification file. This must exist.
-
-    Returns
-    -------
-        A model name string for use in output labeling.
-    """
-    if artifact_path:
-        model_name = Path(artifact_path).stem
-    else:
-        with open(model_spec_path) as model_spec_file:
-            model_spec = yaml.safe_load(model_spec_file)
-        try:
-            model_name = Path(model_spec["configuration"]["input_data"]["artifact_path"]).stem
-        except KeyError:
-            model_name = Path(model_spec_path).stem
-    return model_name
-
-
-def get_output_root(
-    results_directory: Union[str, Path],
-    model_specification_file: Union[str, Path],
-    artifact_path: Union[str, Path],
-) -> Path:
-    """Create a root directory for output files.
-
-    Parameters
-    ----------
-    results_directory
-        Directory to store the results in.
-    model_specification_file
-        Path to the model specification file.
-    artifact_path
-        Path to the artifact file.
-
-    Returns
-    -------
-        The date-stamped output root directory.
-    """
+def get_output_root(results_directory, model_specification_file):
     launch_time = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
-    model_name = get_output_model_name_string(artifact_path, model_specification_file)
+    model_name = Path(model_specification_file).stem
     output_root = Path(results_directory + f"/{model_name}/{launch_time}")
     return output_root
+
+
+def add_logging_sink(sink, verbose, colorize=False, serialize=False):
+    message_format = (
+        "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
+        "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> "
+        "- <level>{message}</level>"
+    )
+    if verbose:
+        logger.add(
+            sink, colorize=colorize, level="DEBUG", format=message_format, serialize=serialize
+        )
+    else:
+        logger.add(
+            sink, colorize=colorize, level="ERROR", format=message_format, serialize=serialize
+        )
+
+
+def configure_logging_to_terminal(verbose):
+    logger.remove(0)  # Clear default configuration
+    add_logging_sink(sys.stdout, verbose, colorize=True)
+
+
+def configure_logging_to_file(output_directory):
+    master_log = output_directory / "simulation.log"
+    add_logging_sink(master_log, verbose=True)

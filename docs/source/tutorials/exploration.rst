@@ -88,20 +88,20 @@ One of the things we might want to look at is the simulation
 information, but leaves many things set to defaults. We can see what's in the
 configuration by simply printing it.
 
-.. testsetup:: configuration
+.. testsetup::
 
    from vivarium.examples.disease_model import get_disease_model_simulation
 
    sim = get_disease_model_simulation()
 
-   del sim.configuration['input_data']
-   del sim.configuration['stratification']['excluded_categories']
+   if 'input_data' in sim.configuration:
+       del sim.configuration['input_data']
 
-.. testcode:: configuration
+.. testcode::
 
    print(sim.configuration)
 
-.. testoutput:: configuration
+.. testoutput::
 
     randomness:
         key_columns:
@@ -129,8 +129,6 @@ configuration by simply printing it.
                 model_override: 31
         step_size:
             model_override: 0.5
-        standard_step_size:
-            component_configs: None
     population:
         population_size:
             model_override: 100000
@@ -166,14 +164,14 @@ configuration by simply printing it.
             component_configs: True
         extrapolate:
             component_configs: True
-    stratification:
-        default:
-            component_configs: []
-        deaths:
-            exclude:
-                component_configs: []
-            include:
-                component_configs: []
+    input_data:
+        artifact_path:
+            component_configs: None
+        artifact_filter_term:
+            component_configs: None
+        input_draw_number:
+            component_configs: None
+
 
 
 What do we see here?  The configuration is *hierarchical*.  There are a set of
@@ -220,7 +218,7 @@ has already been setup.
 
 .. testcode::
 
-   from layered_config_tree import ConfigurationError
+   from vivarium.config_tree import ConfigurationError
 
    try:
        sim.configuration.randomness.update({'random_seed': 5})
@@ -272,12 +270,12 @@ your starting population.
 
 ::
 
-       tracked       age  alive     sex       entrance_time                 lower_respiratory_infections  child_wasting_propensity
-    0     True  4.341734  alive    Male 2021-12-31 12:00:00  susceptible_to_lower_respiratory_infections                  0.612086
-    1     True  1.009906  alive    Male 2021-12-31 12:00:00  susceptible_to_lower_respiratory_infections                  0.395465
-    2     True  1.166290  alive    Male 2021-12-31 12:00:00  susceptible_to_lower_respiratory_infections                  0.670765
-    3     True  4.075051  alive  Female 2021-12-31 12:00:00  susceptible_to_lower_respiratory_infections                  0.289266
-    4     True  2.133430  alive  Female 2021-12-31 12:00:00  susceptible_to_lower_respiratory_infections                  0.700001
+      tracked     sex  alive        age entrance_time  child_growth_failure_propensity                 diarrhea
+   0     True  Female  alive   3.452598    2005-06-28                         0.552276  susceptible_to_diarrhea
+   1     True  Female  alive   4.773249    2005-06-28                         0.019633  susceptible_to_diarrhea
+   2     True    Male  alive  23.423383    2005-06-28                         0.578892  susceptible_to_diarrhea
+   3     True  Female  alive  13.792463    2005-06-28                         0.988650  susceptible_to_diarrhea
+   4     True    Male  alive   0.449368    2005-06-28                         0.407759  susceptible_to_diarrhea
 
 This gives you a ``pandas.DataFrame`` representing your starting population.
 You can use it to check all sorts of characteristics about individuals or
@@ -308,31 +306,26 @@ the population as a whole.
     75%           3.744090
     max           4.999967
     Name: age, dtype: float64
-    alive
     alive    100000
-    Name: count, dtype: int64
+    Name: alive, dtype: int64
     count    100000.000000
-    mean          0.499756
-    std           0.288412
-    min           0.000015
-    25%           0.251550
-    50%           0.497587
-    75%           0.749215
+    mean          0.500602
+    std           0.288434
+    min           0.000022
+    25%           0.251288
+    50%           0.499957
+    75%           0.749816
     max           0.999978
     Name: child_wasting_propensity, dtype: float64
-    lower_respiratory_infections
     susceptible_to_lower_respiratory_infections    100000
-    Name: count, dtype: int64
-    entrance_time
+    Name: lower_respiratory_infections, dtype: int64
     2021-12-31 12:00:00    100000
-    Name: count, dtype: int64
-    sex
-    Male      50185
-    Female    49815
-    Name: count, dtype: int64
-    tracked
+    Name: entrance_time, dtype: int64
+    Male      50162
+    Female    49838
+    Name: sex, dtype: int64
     True    100000
-    Name: count, dtype: int64
+    Name: tracked, dtype: int64
 
 
 

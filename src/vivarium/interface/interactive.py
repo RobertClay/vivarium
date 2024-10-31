@@ -1,4 +1,3 @@
-# mypy: ignore-errors
 """
 ==========================
 Vivarium Interactive Tools
@@ -13,20 +12,25 @@ See the associated tutorials for :ref:`running <interactive_tutorial>` and
 :ref:`exploring <exploration_tutorial>` for more information.
 
 """
-
 from math import ceil
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List
 
 import pandas as pd
 
 from vivarium.framework.engine import SimulationContext
+from vivarium.framework.time import Time, Timedelta
 from vivarium.framework.values import Pipeline
-from vivarium.interface.utilities import log_progress, run_from_ipython
-from vivarium.types import ClockStepSize, ClockTime
+
+from .utilities import log_progress, run_from_ipython
 
 
 class InteractiveContext(SimulationContext):
-    """A simulation context with helper methods for running simulations interactively."""
+    """A simulation context with helper methods for running simulations
+    interactively.
+
+    This class should not be instantiated directly. It should be created with a
+    call to one of the helper methods provided in this module.
+    """
 
     def __init__(self, *args, setup=True, **kwargs):
         super().__init__(*args, **kwargs)
@@ -35,7 +39,7 @@ class InteractiveContext(SimulationContext):
             self.setup()
 
     @property
-    def current_time(self) -> ClockTime:
+    def current_time(self) -> Time:
         """Returns the current simulation time."""
         return self._clock.time
 
@@ -43,27 +47,24 @@ class InteractiveContext(SimulationContext):
         super().setup()
         self.initialize_simulants()
 
-    def step(self, step_size: Optional[ClockStepSize] = None) -> None:
+    def step(self, step_size: Timedelta = None):
         """Advance the simulation one step.
 
         Parameters
         ----------
         step_size
-            An optional size of step to take. Must be compatible with the
+            An optional size of step to take. Must be the same type as the
             simulation clock's step size (usually a pandas.Timedelta).
         """
-        old_step_size = self._clock._clock_step_size
+        old_step_size = self._clock.step_size
         if step_size is not None:
-            if not (
-                isinstance(step_size, type(self._clock.step_size))
-                or isinstance(self._clock.step_size, type(step_size))
-            ):
+            if not isinstance(step_size, type(self._clock.step_size)):
                 raise ValueError(
-                    f"Provided time must be compatible with {type(self._clock.step_size)}"
+                    f"Provided time must be an instance of {type(self._clock.step_size)}"
                 )
-            self._clock._clock_step_size = step_size
+            self._clock._step_size = step_size
         super().step()
-        self._clock._clock_step_size = old_step_size
+        self._clock._step_size = old_step_size
 
     def run(self, with_logging: bool = True) -> int:
         """Run the simulation for the duration specified in the configuration.
@@ -76,18 +77,20 @@ class InteractiveContext(SimulationContext):
 
         Returns
         -------
+        int
             The number of steps the simulation took.
+
         """
         return self.run_until(self._clock.stop_time, with_logging=with_logging)
 
-    def run_for(self, duration: ClockStepSize, with_logging: bool = True) -> int:
+    def run_for(self, duration: Timedelta, with_logging: bool = True) -> int:
         """Run the simulation for the given time duration.
 
         Parameters
         ----------
         duration
-            The length of time to run the simulation for. Should be compatible
-            with the simulation clock's step size (usually a pandas
+            The length of time to run the simulation for. Should be the same
+            type as the simulation clock's step size (usually a pandas
             Timedelta).
         with_logging
             Whether or not to log the simulation steps. Only works in an ipython
@@ -95,35 +98,32 @@ class InteractiveContext(SimulationContext):
 
         Returns
         -------
+        int
             The number of steps the simulation took.
+
         """
         return self.run_until(self._clock.time + duration, with_logging=with_logging)
 
-    def run_until(self, end_time: ClockTime, with_logging: bool = True) -> int:
+    def run_until(self, end_time: Time, with_logging: bool = True) -> int:
         """Run the simulation until the provided end time.
 
         Parameters
         ----------
         end_time
             The time to run the simulation until. The simulation will run until
-            its clock is greater than or equal to the provided end time. Must be
-            compatible with the simulation clock's step size (usually a pandas.Timestamp)
-
+            its clock is greater than or equal to the provided end time.
         with_logging
             Whether or not to log the simulation steps. Only works in an ipython
             environment.
 
         Returns
         -------
+        int
             The number of steps the simulation took.
+
         """
-        if not (
-            isinstance(end_time, type(self._clock.time))
-            or isinstance(self._clock.time, type(end_time))
-        ):
-            raise ValueError(
-                f"Provided time must be compatible with {type(self._clock.time)}"
-            )
+        if not isinstance(end_time, type(self._clock.time)):
+            raise ValueError(f"Provided time must be an instance of {type(self._clock.time)}")
 
         iterations = int(ceil((end_time - self._clock.time) / self._clock.step_size))
         self.take_steps(number_of_steps=iterations, with_logging=with_logging)
@@ -131,10 +131,7 @@ class InteractiveContext(SimulationContext):
         return iterations
 
     def take_steps(
-        self,
-        number_of_steps: int = 1,
-        step_size: Optional[ClockStepSize] = None,
-        with_logging: bool = True,
+        self, number_of_steps: int = 1, step_size: Timedelta = None, with_logging: bool = True
     ):
         """Run the simulation for the given number of steps.
 
@@ -143,11 +140,12 @@ class InteractiveContext(SimulationContext):
         number_of_steps
             The number of steps to take.
         step_size
-            An optional size of step to take. Must be compatible with the
+            An optional size of step to take. Must be the same type as the
             simulation clock's step size (usually a pandas.Timedelta).
         with_logging
             Whether or not to log the simulation steps. Only works in an ipython
             environment.
+
         """
         if not isinstance(number_of_steps, int):
             raise ValueError("Number of steps must be an integer.")
@@ -168,11 +166,11 @@ class InteractiveContext(SimulationContext):
             Whether or not to return simulants who are no longer being tracked
             by the simulation.
 
-        Returns
-        -------
-            The population state table.
         """
         return self._population.get_population(untracked)
+
+    def destroy_untracked_simulants(self):
+        self._population._destroy_untracked_simulants()
 
     def list_values(self) -> List[str]:
         """List the names of all pipelines in the simulation."""
@@ -186,7 +184,7 @@ class InteractiveContext(SimulationContext):
         """List all event types registered with the simulation."""
         return self._events.list_events()
 
-    def get_listeners(self, event_type: str) -> Dict[int, List[Callable]]:
+    def get_listeners(self, event_type: str) -> List[Callable]:
         """Get all listeners of a particular type of event.
 
         Available event types can be found by calling
@@ -197,10 +195,6 @@ class InteractiveContext(SimulationContext):
         event_type
             The type of event to grab the listeners for.
 
-        Returns
-        -------
-            A dictionary that maps each priority level of the named event's
-            listeners to a list of listeners at that level.
         """
         if event_type not in self._events:
             raise ValueError(f"No event {event_type} in system.")
@@ -217,9 +211,6 @@ class InteractiveContext(SimulationContext):
         event_type
             The type of event to grab the listeners for.
 
-        Returns
-        -------
-            The callable that emits the named event.
         """
         if event_type not in self._events:
             raise ValueError(f"No event {event_type} in system.")
@@ -230,7 +221,9 @@ class InteractiveContext(SimulationContext):
 
         Returns
         -------
+        Dict[str, Any]
             A dictionary mapping component names to components.
+
         """
         return self._component_manager.list_components()
 
@@ -242,28 +235,12 @@ class InteractiveContext(SimulationContext):
         ----------
         name
             A component name.
-
         Returns
         -------
             A component that has the name ``name`` else None.
+
         """
         return self._component_manager.get_component(name)
-
-    def print_initializer_order(self):
-        """Print the order in which population initializers are called."""
-        initializers = []
-        for r in self._resource:
-            name = r.__name__
-            if hasattr(r, "__self__"):
-                obj = r.__self__
-                initializers.append(f"{obj.__class__.__name__}({obj.name}).{name}")
-            else:
-                initializers.append(f"Unbound function {name}")
-        print("\n".join(initializers))
-
-    def print_lifecycle_order(self):
-        """Print the order of lifecycle events (including user event handlers)."""
-        print(self._lifecycle)
 
     def __repr__(self):
         return "InteractiveContext()"

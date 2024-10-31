@@ -5,7 +5,7 @@ The Vivarium Framework
 .. automodule:: vivarium.framework
 
 .. toctree::
-   :maxdepth: 1
+   :maxdepth: 2
    :glob:
 
    *

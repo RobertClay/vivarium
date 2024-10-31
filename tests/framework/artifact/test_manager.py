@@ -33,7 +33,7 @@ def artifact_mock(mocker):
 
 
 def test_subset_rows_extra_filters():
-    data = build_table(1)
+    data = build_table(1, 1990, 2010)
     with pytest.raises(ValueError):
         _subset_rows(data, missing_thing=12)
 
@@ -43,10 +43,8 @@ def test_subset_rows():
         lambda *args, **kwargs: random.choice(["red", "blue"]),
         lambda *args, **kwargs: random.choice([1, 2, 3]),
     ]
-    data = build_table(
-        value=values,
-        value_columns=["color", "number"],
-    )
+    data = build_table(values, 1990, 2010, columns=("age", "year", "sex", "color", "number"))
+
     filtered_data = _subset_rows(data, color="red", number=3)
     assert filtered_data.equals(data[(data.color == "red") & (data.number == 3)])
 
@@ -59,12 +57,7 @@ def test_subset_rows():
 def test_subset_columns():
     values = [0, "red", 100]
     data = build_table(
-        values,
-        parameter_columns={
-            "age": (0, 99),
-            "year": (1990, 2010),
-        },
-        value_columns=["draw", "color", "value"],
+        values, 1990, 2010, columns=("age", "year", "sex", "draw", "color", "value")
     )
 
     filtered_data = _subset_columns(data)
@@ -144,7 +137,7 @@ def test_load_with_df_data(artifact_mock):
 
 def test_config_filter():
     df = pd.DataFrame({"year": range(1990, 2000, 1), "color": ["red", "yellow"] * 5})
-    filtered = _config_filter(df, "year in [1992, 1995]")
+    filtered = +_config_filter(df, "year in [1992, 1995]")
 
     assert set(filtered.year) == {1992, 1995}
 

@@ -1,4 +1,3 @@
-# mypy: ignore-errors
 """
 =======================
 Configuration Utilities
@@ -9,22 +8,21 @@ representations of :term:`model specifications <Model Specification>` and
 :term:`configurations <Configuration>`.
 
 """
-
 from pathlib import Path
-from typing import Dict, Optional, Union
+from typing import Dict, Union
 
 import yaml
-from layered_config_tree import ConfigurationError, LayeredConfigTree
 
+from vivarium.config_tree import ConfigTree, ConfigurationError
 from vivarium.framework.plugins import DEFAULT_PLUGINS
 
 
 def build_model_specification(
-    model_specification: Optional[Union[str, Path, LayeredConfigTree]] = None,
-    component_configuration: Optional[Union[Dict, LayeredConfigTree]] = None,
-    configuration: Optional[Union[Dict, LayeredConfigTree]] = None,
-    plugin_configuration: Optional[Union[Dict, LayeredConfigTree]] = None,
-) -> LayeredConfigTree:
+    model_specification: Union[str, Path, ConfigTree] = None,
+    component_configuration: Union[Dict, ConfigTree] = None,
+    configuration: Union[Dict, ConfigTree] = None,
+    plugin_configuration: Union[Dict, ConfigTree] = None,
+) -> ConfigTree:
     if isinstance(model_specification, (str, Path)):
         validate_model_specification_file(model_specification)
         source = str(model_specification)
@@ -74,7 +72,7 @@ def validate_model_specification_file(file_path: Union[str, Path]) -> None:
         )
 
 
-def build_simulation_configuration() -> LayeredConfigTree:
+def build_simulation_configuration() -> ConfigTree:
     return _get_default_specification().configuration
 
 
@@ -88,7 +86,7 @@ def _get_default_specification():
     ]
     default_metadata = {"layer": "base", "source": "vivarium_defaults"}
 
-    model_specification = LayeredConfigTree(layers=default_config_layers)
+    model_specification = ConfigTree(layers=default_config_layers)
     model_specification.update(DEFAULT_PLUGINS, **default_metadata)
     model_specification.update({"components": {}, "configuration": {}})
 

@@ -1,4 +1,3 @@
-# mypy: ignore-errors
 """
 ===================
 The Vivarium Engine
@@ -19,117 +18,54 @@ Finally, there are a handful of wrapper methods that allow a user or user
 tools to easily setup and run a simulation.
 
 """
-
-import math
 from pathlib import Path
 from pprint import pformat
-from time import time
-from typing import Dict, List, Optional, Set, Union
+from typing import Dict, List, Union
 
-import dill
-import numpy as np
-import pandas as pd
-from layered_config_tree.exceptions import ConfigurationKeyError
-from layered_config_tree.main import LayeredConfigTree
+from loguru import logger
 
-from vivarium import Component
-from vivarium.exceptions import VivariumError
-from vivarium.framework.artifact import ArtifactInterface
-from vivarium.framework.components import ComponentConfigError, ComponentInterface
+from vivarium.config_tree import ConfigTree
 from vivarium.framework.configuration import build_model_specification
-from vivarium.framework.event import EventInterface
-from vivarium.framework.lifecycle import LifeCycleInterface
-from vivarium.framework.logging import LoggingInterface
-from vivarium.framework.lookup import LookupTableInterface
-from vivarium.framework.plugins import PluginManager
-from vivarium.framework.population import PopulationInterface
-from vivarium.framework.randomness import RandomnessInterface
-from vivarium.framework.resource import ResourceInterface
-from vivarium.framework.results import ResultsInterface
-from vivarium.framework.time import TimeInterface
-from vivarium.framework.values import ValuesInterface
-from vivarium.types import ClockTime
+
+from .artifact import ArtifactInterface
+from .components import ComponentInterface
+from .event import EventInterface
+from .lifecycle import LifeCycleInterface
+from .lookup import LookupTableInterface
+from .metrics import Metrics
+from .plugins import PluginManager
+from .population import PopulationInterface
+from .randomness import RandomnessInterface
+from .resource import ResourceInterface
+from .results import ResultsInterface
+from .time import TimeInterface
+from .values import ValuesInterface
 
 
 class SimulationContext:
-    _created_simulation_contexts: Set[str] = set()
-
-    @staticmethod
-    def _get_context_name(sim_name: Union[str, None]) -> str:
-        """Get a unique name for a simulation context.
-
-        Parameters
-        ----------
-        sim_name
-            The name of the simulation context.  If None, a unique name will be generated.
-
-        Returns
-        -------
-            A unique name for the simulation context.
-
-        Notes
-        -----
-        This method mutates process global state (the class attribute
-        ``_created_simulation_contexts``) in order to keep track contexts that have been
-        generated. This functionality makes generating simulation contexts in parallel
-        a non-threadsafe operation.
-        """
-        if sim_name is None:
-            sim_number = len(SimulationContext._created_simulation_contexts) + 1
-            sim_name = f"simulation_{sim_number}"
-
-        if sim_name in SimulationContext._created_simulation_contexts:
-            msg = (
-                "Attempting to create two SimulationContexts "
-                f"with the same name {sim_name}"
-            )
-            raise VivariumError(msg)
-
-        SimulationContext._created_simulation_contexts.add(sim_name)
-        return sim_name
-
-    @staticmethod
-    def _clear_context_cache():
-        """Clear the cache of simulation context names.
-
-        Notes
-        -----
-        This is primarily useful for testing purposes.
-        """
-        SimulationContext._created_simulation_contexts = set()
-
     def __init__(
         self,
-        model_specification: Optional[Union[str, Path, LayeredConfigTree]] = None,
-        components: Optional[Union[List[Component], Dict, LayeredConfigTree]] = None,
-        configuration: Optional[Union[Dict, LayeredConfigTree]] = None,
-        plugin_configuration: Optional[Union[Dict, LayeredConfigTree]] = None,
-        sim_name: Optional[str] = None,
-        logging_verbosity: int = 1,
+        model_specification: Union[str, Path, ConfigTree] = None,
+        components: Union[List, Dict, ConfigTree] = None,
+        configuration: Union[Dict, ConfigTree] = None,
+        plugin_configuration: Union[Dict, ConfigTree] = None,
     ):
-        self._name = self._get_context_name(sim_name)
-
         # Bootstrap phase: Parse arguments, make private managers
         component_configuration = (
-            components if isinstance(components, (dict, LayeredConfigTree)) else None
+            components if isinstance(components, (dict, ConfigTree)) else None
         )
         self._additional_components = components if isinstance(components, List) else []
-        self.model_specification = build_model_specification(
+        model_specification = build_model_specification(
             model_specification, component_configuration, configuration, plugin_configuration
         )
 
-        self._plugin_configuration = self.model_specification.plugins
-        self._component_configuration = self.model_specification.components
-        self.configuration = self.model_specification.configuration
+        self._plugin_configuration = model_specification.plugins
+        self._component_configuration = model_specification.components
+        self.configuration = model_specification.configuration
 
-        self._plugin_manager = PluginManager(self.model_specification.plugins)
+        self._plugin_manager = PluginManager(model_specification.plugins)
 
-        self._logging = self._plugin_manager.get_plugin("logging")
-        self._logging.configure_logging(
-            simulation_name=self.name,
-            verbosity=logging_verbosity,
-        )
-        self._logger = self._logging.get_logger()
+        # TODO: Setup logger here.
 
         self._builder = Builder(self.configuration, self._plugin_manager)
 
@@ -161,18 +97,17 @@ class SimulationContext:
             setattr(self, f"_{name}", controller)
 
         # The order the managers are added is important.  It represents the
-        # order in which they will be set up.  The logging manager and the clock are
-        # required by several of the other managers, including the lifecycle manager. The
+        # order in which they will be set up.  The clock is required by
+        # several of the other managers, including the lifecycle manager.  The
         # lifecycle manager is also required by most managers. The randomness
         # manager requires the population manager.  The remaining managers need
         # no ordering.
         managers = [
-            self._logging,
+            self._clock,
             self._lifecycle,
             self._resource,
             self._values,
             self._population,
-            self._clock,
             self._randomness,
             self._events,
             self._tables,
@@ -188,16 +123,8 @@ class SimulationContext:
         components = (
             component_config_parser.get_components(self._component_configuration)
             + self._additional_components
+            + [Metrics()]
         )
-
-        non_components = [obj for obj in components if not isinstance(obj, Component)]
-        if non_components:
-            message = (
-                "Attempting to create a simulation with the following components "
-                "that do not inherit from `vivarium.Component`: "
-                f"[{[c.name for c in non_components]}]."
-            )
-            raise ComponentConfigError(message)
 
         self._lifecycle.add_constraint(self.add_components, allow_during=["initialization"])
         self._lifecycle.add_constraint(
@@ -207,27 +134,10 @@ class SimulationContext:
         self.add_components(components)
 
     @property
-    def name(self) -> str:
-        return self._name
+    def name(self):
+        return "simulation_context"
 
-    @property
-    def current_time(self) -> ClockTime:
-        """Returns the current simulation time."""
-        return self._clock.time
-
-    def get_results(self) -> Dict[str, pd.DataFrame]:
-        """Return the formatted results."""
-        return self._results.get_results()
-
-    def run_simulation(self) -> None:
-        """A wrapper method to run all steps of a simulation"""
-        self.setup()
-        self.initialize_simulants()
-        self.run()
-        self.finalize()
-        self.report()
-
-    def setup(self) -> None:
+    def setup(self):
         self._lifecycle.set_state("setup")
         self.configuration.freeze()
         self._component_manager.setup_components(self._builder)
@@ -239,119 +149,63 @@ class SimulationContext:
             k: self._builder.event.get_emitter(k) for k in self.time_step_events
         }
         self.end_emitter = self._builder.event.get_emitter("simulation_end")
-        self.report_emitter = self._builder.event.get_emitter("report")
 
         post_setup = self._builder.event.get_emitter("post_setup")
         self._lifecycle.set_state("post_setup")
         post_setup(None)
 
-    def initialize_simulants(self) -> None:
+    def initialize_simulants(self):
         self._lifecycle.set_state("population_creation")
         pop_params = self.configuration.population
         # Fencepost the creation of the initial population.
         self._clock.step_backward()
         population_size = pop_params.population_size
-        self.simulant_creator(population_size, {"sim_state": "setup"})
-        self._clock.step_forward(self.get_population().index)
+        self.simulant_creator(
+            population_size, population_configuration={"sim_state": "setup"}
+        )
+        self._clock.step_forward()
 
-    def step(self) -> None:
-        self._logger.debug(self.current_time)
+    def step(self):
+        logger.debug(self._clock.time)
         for event in self.time_step_events:
-            self._logger.debug(f"Event: {event}")
             self._lifecycle.set_state(event)
-            pop_to_update = self._clock.get_active_simulants(
-                self.get_population().index,
-                self._clock.event_time,
-            )
-            self._logger.debug(f"Updating: {len(pop_to_update)}")
-            self.time_step_emitters[event](pop_to_update)
-        self._clock.step_forward(self.get_population().index)
+            self.time_step_emitters[event](self._population.get_population(True).index)
+        self._clock.step_forward()
 
-    def run(
-        self,
-        backup_path: Optional[Path] = None,
-        backup_freq: Optional[Union[int, float]] = None,
-    ) -> None:
-        if backup_freq:
-            time_to_save = time() + backup_freq
-            while self.current_time < self._clock.stop_time:
-                self.step()
-                if time() >= time_to_save:
-                    self._logger.debug(f"Writing Simulation Backup to {backup_path}")
-                    self.write_backup(backup_path)
-                    time_to_save = time() + backup_freq
-        else:
-            while self.current_time < self._clock.stop_time:
-                self.step()
+    def run(self):
+        while self._clock.time < self._clock.stop_time:
+            self.step()
 
-    def finalize(self) -> None:
+    def finalize(self):
         self._lifecycle.set_state("simulation_end")
-        self.end_emitter(self.get_population().index)
+        self.end_emitter(self._population.get_population(True).index)
         unused_config_keys = self.configuration.unused_keys()
         if unused_config_keys:
-            self._logger.warning(
+            logger.debug(
                 f"Some configuration keys not used during run: {unused_config_keys}."
             )
 
-    def report(self, print_results: bool = True) -> None:
+    def report(self, print_results=True):
         self._lifecycle.set_state("report")
-        self.report_emitter(self.get_population().index)
-        results = self.get_results()
+        metrics = self._values.get_value("metrics")(
+            self._population.get_population(True).index
+        )
         if print_results:
-            for measure, df in results.items():
-                self._logger.info(f"\n{measure}:\n{pformat(df)}")
-            performance_metrics = self.get_performance_metrics()
-            performance_metrics = performance_metrics.to_string(
-                index=False,
-                float_format=lambda x: f"{x:.2f}",
-            )
-            self._logger.info("\n" + performance_metrics)
-        self._write_results(results)
+            logger.debug(pformat(metrics))
+        return metrics
 
-    def _write_results(self, results: dict[str, pd.DataFrame]) -> None:
-        """Iterate through the measures and write out the formatted results"""
-        try:
-            results_dir = self.configuration.output_data.results_directory
-            for measure, df in results.items():
-                output_file = Path(results_dir) / f"{measure}.parquet"
-                df.to_parquet(output_file, index=False)
-        except ConfigurationKeyError:
-            self._logger.info("No results directory set; results are not written to disk.")
-
-    def write_backup(self, backup_path: Path) -> None:
-        with open(backup_path, "wb") as f:
-            dill.dump(self, f, protocol=dill.HIGHEST_PROTOCOL)
-
-    def get_performance_metrics(self) -> pd.DataFrame:
-        timing_dict = self._lifecycle.timings
-        total_time = np.sum([np.sum(v) for v in timing_dict.values()])
-        timing_dict["total"] = [total_time]
-        records = [
-            {
-                "Event": label,
-                "Count": len(ts),
-                "Mean time (s)": np.mean(ts),
-                "Std. dev. time (s)": np.std(ts),
-                "Total time (s)": sum(ts),
-                "% Total time": 100 * sum(ts) / total_time,
-            }
-            for label, ts in timing_dict.items()
-        ]
-        performance_metrics = pd.DataFrame(records)
-        return performance_metrics
-
-    def add_components(self, component_list: List[Component]) -> None:
+    def add_components(self, component_list):
         """Adds new components to the simulation."""
         self._component_manager.add_components(component_list)
 
-    def get_population(self, untracked: bool = True) -> pd.DataFrame:
+    def get_population(self, untracked: bool = True):
         return self._population.get_population(untracked)
 
     def __repr__(self):
-        return f"SimulationContext({self.name})"
+        return "SimulationContext()"
 
-    def get_number_of_steps_remaining(self) -> int:
-        return self._clock.time_steps_remaining
+    def __str__(self):
+        return str(self._lifecycle)
 
 
 class Builder:
@@ -362,39 +216,31 @@ class Builder:
 
     Attributes
     ----------
-    configuration : ``LayeredConfigTree``
-        Provides access to the :ref:`configuration<configuration_concept>`
-    logging : LoggingInterface
-        Provides access to the :ref:`logging<logging_concept>` system.
-    lookup : LookupTableInterface
+    lookup: LookupTableInterface
         Provides access to simulant-specific data via the
         :ref:`lookup table<lookup_concept>` abstraction.
-    value : ValuesInterface
+    value: ValuesInterface
         Provides access to computed simulant attribute values via the
         :ref:`value pipeline<values_concept>` system.
-    event : EventInterface
+    event: EventInterface
         Provides access to event listeners utilized in the
         :ref:`event<event_concept>` system.
-    population : PopulationInterface
+    population: PopulationInterface
         Provides access to simulant state table via the
         :ref:`population<population_concept>` system.
-    resources : ResourceInterface
+    resource: ResourceInterface
         Provides access to the :ref:`resource<resource_concept>` system,
         which manages dependencies between components.
-    results : ResultsInterface
-        Provides access to the :ref:`results<results_concept>` system.
-    randomness : RandomnessInterface
-        Provides access to the :ref:`randomness<crn_concept>` system.
-    time : TimeInterface
+    time: TimeInterface
         Provides access to the simulation's :ref:`clock<time_concept>`.
-    components : ComponentInterface
+    components: ComponentInterface
         Provides access to the :ref:`component management<components_concept>`
         system, which maintains a reference to all managers and components in
         the simulation.
-    lifecycle : LifeCycleInterface
+    lifecycle: LifeCycleInterface
         Provides access to the :ref:`life-cycle<lifecycle_concept>` system,
         which manages the simulation's execution life-cycle.
-    data : ArtifactInterface
+    data: ArtifactInterface
         Provides access to the simulation's input data housed in the
         :ref:`data artifact<data_concept>`.
 
@@ -408,9 +254,6 @@ class Builder:
     def __init__(self, configuration, plugin_manager):
         self.configuration = configuration
 
-        self.logging = plugin_manager.get_plugin_interface(
-            "logging"
-        )  # type: LoggingInterface
         self.lookup = plugin_manager.get_plugin_interface(
             "lookup"
         )  # type: LookupTableInterface
@@ -442,3 +285,19 @@ class Builder:
 
     def __repr__(self):
         return "Builder()"
+
+
+def run_simulation(
+    model_specification: Union[str, Path, ConfigTree] = None,
+    components: Union[List, Dict, ConfigTree] = None,
+    configuration: Union[Dict, ConfigTree] = None,
+    plugin_configuration: Union[Dict, ConfigTree] = None,
+):
+    simulation = SimulationContext(
+        model_specification, components, configuration, plugin_configuration
+    )
+    simulation.setup()
+    simulation.initialize_simulants()
+    simulation.run()
+    simulation.finalize()
+    return simulation

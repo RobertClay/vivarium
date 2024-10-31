@@ -26,21 +26,12 @@ For more information, see the associated event
 :ref:`concept note <event_concept>`.
 
 """
-
-from __future__ import annotations
-
-from collections.abc import Callable
-from datetime import datetime
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import Any, Callable, Dict, List, NamedTuple, Optional
 
 import pandas as pd
 
-from vivarium.framework.lifecycle import ConstraintError
-from vivarium.manager import Interface, Manager
-from vivarium.types import ClockStepSize, ClockTime
-
-if TYPE_CHECKING:
-    from vivarium.framework.engine import Builder
+from .lifecycle import ConstraintError
+from .time import Time, Timedelta
 
 
 class Event(NamedTuple):
@@ -49,20 +40,21 @@ class Event(NamedTuple):
     Events themselves are just a bundle of data.  They must be emitted
     along an :class:`EventChannel` in order for other simulation components
     to respond to them.
+
     """
 
-    # FIXME [MIC-5468]: fix index type hint for mypy
-    index: pd.Index[int]  # type: ignore[assignment]
-    """An index into the population table containing all simulants affected by this event."""
-    user_data: dict[str, Any]
-    """Any additional data provided by the user about the event."""
-    time: ClockTime
-    """The simulation time at which this event will resolve. The current simulation
-    size plus the current time step size."""
-    step_size: ClockStepSize
-    """The current step size at the time of the event."""
+    #: An index into the population table containing all simulants affected
+    #: by this event.
+    index: pd.Index
+    #: Any additional data provided by the user about the event.
+    user_data: Dict[str, Any]
+    #: The simulation time at which this event will resolve. The current
+    #: simulation size plus the current time step size.
+    time: Time
+    #: The current step size at the time of the event.
+    step_size: Timedelta
 
-    def split(self, new_index: pd.Index[int]) -> "Event":
+    def split(self, new_index: pd.Index) -> "Event":
         """Create a copy of this event with a new index.
 
         This function should be used to emit an event in a new
@@ -77,28 +69,30 @@ class Event(NamedTuple):
 
         Returns
         -------
+        Event
             The new event.
+
         """
         return Event(new_index, self.user_data, self.time, self.step_size)
 
-    def __repr__(self) -> str:
+    def __repr__(self):
         return (
             f"Event(user_data={self.user_data}, time={self.time}, step_size={self.step_size})"
         )
 
-    def __eq__(self, other: object) -> bool:
+    def __eq__(self, other):
         return self.__dict__ == other.__dict__
 
 
 class EventChannel:
     """A named subscription channel that passes events to event listeners."""
 
-    def __init__(self, manager: EventManager, name: str) -> None:
+    def __init__(self, manager, name):
         self.name = f"event_channel_{name}"
         self.manager = manager
-        self.listeners: list[list[Callable[[Event], None]]] = [[] for _ in range(10)]
+        self.listeners = [[] for _ in range(10)]
 
-    def emit(self, index: pd.Index[int], user_data: dict[str, Any] | None = None) -> Event:
+    def emit(self, index: pd.Index, user_data: Dict = None) -> Event:
         """Notifies all listeners to this channel that an event has occurred.
 
         Events are emitted to listeners in order of priority (with order 0 being
@@ -112,13 +106,14 @@ class EventChannel:
             affected by this event.
         user_data
             Any additional data provided by the user about the event.
+
         """
         if not user_data:
             user_data = {}
         e = Event(
             index,
             user_data,
-            self.manager.clock() + self.manager.step_size(),  # type: ignore[operator, arg-type]
+            self.manager.clock() + self.manager.step_size(),
             self.manager.step_size(),
         )
 
@@ -127,11 +122,11 @@ class EventChannel:
                 listener(e)
         return e
 
-    def __repr__(self) -> str:
+    def __repr__(self):
         return f"EventChannel(listeners: {[listener for bucket in self.listeners for listener in bucket]})"
 
 
-class EventManager(Manager):
+class EventManager:
     """The configuration for the event system.
 
     Notes
@@ -142,26 +137,27 @@ class EventManager(Manager):
 
     """
 
-    def __init__(self) -> None:
-        self._event_types: dict[str, EventChannel] = {}
+    def __init__(self):
+        self._event_types = {}
 
     @property
-    def name(self) -> str:
+    def name(self):
         """The name of this component."""
         return "event_manager"
 
-    def get_channel(self, name: str) -> EventChannel:
+    def get_channel(self, name):
         if name not in self._event_types:
             self._event_types[name] = EventChannel(self, name)
         return self._event_types[name]
 
-    def setup(self, builder: Builder) -> None:
+    def setup(self, builder):
         """Performs this component's simulation setup.
 
         Parameters
         ----------
         builder
             Object giving access to core framework functionality.
+
         """
         self.clock = builder.time.clock()
         self.step_size = builder.time.step_size()
@@ -175,13 +171,11 @@ class EventManager(Manager):
         )
         builder.lifecycle.add_constraint(self.register_listener, allow_during=["setup"])
 
-    def on_post_setup(self, event: Event) -> None:
+    def on_post_setup(self, event):
         for name, channel in self._event_types.items():
             self.add_handlers(name, [h for level in channel.listeners for h in level])
 
-    def get_emitter(
-        self, name: str
-    ) -> Callable[[pd.Index[int], dict[str, Any] | None], Event]:
+    def get_emitter(self, name: str) -> Callable[[pd.Index, Optional[Dict]], Event]:
         """Get an emitter function for the named event.
 
         Parameters
@@ -194,6 +188,7 @@ class EventManager(Manager):
             A function that accepts an index and optional user data. This function
             creates and timestamps an Event and distributes it to all interested
             listeners
+
         """
         channel = self.get_channel(name)
         try:
@@ -204,9 +199,7 @@ class EventManager(Manager):
             pass
         return channel.emit
 
-    def register_listener(
-        self, name: str, listener: Callable[[Event], None], priority: int = 5
-    ) -> None:
+    def register_listener(self, name: str, listener: Callable, priority: int = 5):
         """Registers a new listener to the named event.
 
         Parameters
@@ -221,8 +214,8 @@ class EventManager(Manager):
         """
         self.get_channel(name).listeners[priority].append(listener)
 
-    def get_listeners(self, name: str) -> dict[int, list[Callable[[Event], None]]]:
-        """Get all listeners registered for the named event.
+    def get_listeners(self, name: str) -> Dict[int, List[Callable]]:
+        """Get  all listeners registered for the named event.
 
         Parameters
         ----------
@@ -241,36 +234,36 @@ class EventManager(Manager):
             if listeners
         }
 
-    def list_events(self) -> list[str]:
+    def list_events(self) -> List[Event]:
         """List all event names known to the event system.
 
         Returns
         -------
-            A list of all known events names.
+        List[Event]
+            A list of all known event names.
 
         Notes
         -----
         This value can change after setup if components dynamically create
         new event labels.
-        """
-        return list(self._event_types)
 
-    def __contains__(self, item: str) -> bool:
+        """
+        return list(self._event_types.keys())
+
+    def __contains__(self, item):
         return item in self._event_types
 
-    def __repr__(self) -> str:
+    def __repr__(self):
         return "EventManager()"
 
 
-class EventInterface(Interface):
+class EventInterface:
     """The public interface for the event system."""
 
     def __init__(self, manager: EventManager):
         self._manager = manager
 
-    def get_emitter(
-        self, name: str
-    ) -> Callable[[pd.Index[int], dict[str, Any] | None], Event]:
+    def get_emitter(self, name: str) -> Callable[[pd.Index, Optional[Dict]], Event]:
         """Gets an emitter for a named event.
 
         Parameters
@@ -286,6 +279,7 @@ class EventInterface(Interface):
             An emitter for the named event. The emitter should be called by
             the requesting component at the appropriate point in the simulation
             lifecycle.
+
         """
         return self._manager.get_emitter(name)
 
@@ -326,5 +320,6 @@ class EventInterface(Interface):
             state table (the state of the simulation at the beginning of the
             next time step should only depend on the current state of the
             system).
+
         """
         self._manager.register_listener(name, listener, priority)

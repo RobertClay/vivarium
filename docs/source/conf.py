@@ -17,6 +17,9 @@ import sys
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 from pathlib import Path
 
+from docutils.nodes import Text
+from sphinx.ext.intersphinx import missing_reference
+
 import vivarium
 
 base_dir = Path(vivarium.__file__).parent
@@ -30,13 +33,13 @@ sys.path.insert(0, str(Path("..").resolve()))
 # -- Project information -----------------------------------------------------
 
 project = about["__title__"]
-copyright = f'2023, {about["__author__"]}'
+copyright = f'2021, {about["__author__"]}'
 author = about["__author__"]
 
 # The short X.Y version.
-version = vivarium.__version__
+version = about["__version__"]
 # The full version, including alpha/beta/rc tags.
-release = vivarium.__version__
+release = about["__version__"]
 
 
 # -- General configuration ------------------------------------------------
@@ -50,7 +53,6 @@ needs_sphinx = "4.0"
 # ones.
 extensions = [
     "sphinx.ext.autodoc",
-    "sphinx_autodoc_typehints",
     "sphinx.ext.intersphinx",
     "sphinx.ext.doctest",
     "sphinx.ext.todo",
@@ -60,7 +62,6 @@ extensions = [
     "sphinx.ext.viewcode",
     "sphinx_click.ext",
     "matplotlib.sphinxext.plot_directive",
-    "sphinxcontrib.video",
 ]
 
 # Add any paths that contain templates here, relative to this directory.
@@ -83,7 +84,7 @@ master_doc = "index"
 #
 # This is also used if you do content translation via gettext catalogs.
 # Usually you set "language" from the command line for these cases.
-language = "en"
+language = None
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
@@ -194,12 +195,11 @@ texinfo_documents = [
 
 # Other docs we can link to
 intersphinx_mapping = {
-    "python": ("https://docs.python.org/", None),
+    "python": ("https://docs.python.org/3.8", None),
     "pandas": ("https://pandas.pydata.org/pandas-docs/stable/", None),
     "tables": ("https://www.pytables.org/", None),
     "numpy": ("https://numpy.org/doc/stable/", None),
     "networkx": ("https://networkx.org/documentation/stable/", None),
-    "layered_config_tree": ("https://layered-config-tree.readthedocs.io/en/latest/", None),
 }
 
 
@@ -233,3 +233,22 @@ for line in open("../nitpick-exceptions"):
     dtype, target = line.split(None, 1)
     target = target.strip()
     nitpick_ignore.append((dtype, target))
+
+
+# Fix sphinx warnings when for literal Ellipses in type hints.
+def setup(app):
+    app.connect("missing-reference", __sphinx_issue_8127)
+
+
+def __sphinx_issue_8127(app, env, node, contnode):
+    reftarget = node.get("reftarget", None)
+    if reftarget == "..":
+        node["reftype"] = "data"
+        node["reftarget"] = "Ellipsis"
+        text_node = next(iter(contnode.traverse(lambda n: n.tagname == "#text")))
+        replacement_node = Text("...", "")
+        if text_node.parent is not None:
+            text_node.parent.replace(text_node, replacement_node)
+        else:  # e.g. happens in rtype fields
+            contnode = replacement_node
+        return missing_reference(app, env, node, contnode)

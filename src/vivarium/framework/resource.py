@@ -16,19 +16,13 @@ and in turn ask for ordered sequences of these resources according to their
 dependencies or raise exceptions if this is not possible.
 
 """
-
-from __future__ import annotations
-
-from collections.abc import Iterator
-from typing import TYPE_CHECKING, Any
+from types import MethodType
+from typing import Any, Callable, Iterable, List
 
 import networkx as nx
+from loguru import logger
 
 from vivarium.exceptions import VivariumError
-from vivarium.manager import Interface, Manager
-
-if TYPE_CHECKING:
-    from vivarium.framework.engine import Builder
 
 
 class ResourceError(VivariumError):
@@ -63,9 +57,9 @@ class ResourceGroup:
     def __init__(
         self,
         resource_type: str,
-        resource_names: list[str],
-        producer: Any,
-        dependencies: list[str],
+        resource_names: List[str],
+        producer: Callable,
+        dependencies: List[str],
     ):
         self._resource_type = resource_type
         self._resource_names = resource_names
@@ -77,11 +71,12 @@ class ResourceGroup:
         """The type of resource produced by this resource group's producer.
 
         Must be one of `RESOURCE_TYPES`.
+
         """
         return self._resource_type
 
     @property
-    def names(self) -> list[str]:
+    def names(self) -> List[str]:
         """The long names (including type) of all resources in this group."""
         return [f"{self._resource_type}.{name}" for name in self._resource_names]
 
@@ -91,11 +86,11 @@ class ResourceGroup:
         return self._producer
 
     @property
-    def dependencies(self) -> list[str]:
+    def dependencies(self) -> List[str]:
         """The long names (including type) of dependencies for this group."""
         return self._dependencies
 
-    def __iter__(self) -> Iterator[str]:
+    def __iter__(self) -> Iterable[str]:
         return iter(self.names)
 
     def __repr__(self) -> str:
@@ -107,23 +102,23 @@ class ResourceGroup:
         return f"({resources})"
 
 
-class ResourceManager(Manager):
+class ResourceManager:
     """Manages all the resources needed for population initialization."""
 
-    def __init__(self) -> None:
-        self._resource_group_map: dict[str, ResourceGroup] = {}
-        """Resource - resource group mapping. This will be a dict with string keys 
-        representing the the resource and the resource group they belong to. This 
-        is a one to many mapping as some resource groups contain many resources."""
+    def __init__(self):
+        # This will be a dict with string keys representing the the resource
+        # and the resource group they belong to. This is a one to many mapping
+        # as some resource groups contain many resources.
+        self._resource_group_map = {}
+        # null producers are those that don't produce any resources externally
+        # but still consume other resources (i.e., have dependencies) - these
+        # are only pop initializers as of 9/26/2019. Tracker is here to assign
+        # them unique ids.
         self._null_producer_count = 0
-        """Null producer counter. Null producers are those that don't produce any 
-        resources externally but still consume other resources (i.e., have 
-        dependencies) - these are only pop initializers as of 9/26/2019. Tracker 
-        is here to assign them unique ids."""
-        self._graph: nx.DiGraph | None = None
-        """Attribute used for lazy (but cached) graph initialization."""
-        self._sorted_nodes: list[ResourceGroup] | None = None
-        """Attribute used for lazy (but cached) graph topo sort."""
+        # Attribute used for lazy (but cached) graph initialization.
+        self._graph = None
+        # Attribute used for lazy (but cached) graph topo sort.
+        self._sorted_nodes = None
 
     @property
     def name(self) -> str:
@@ -138,17 +133,18 @@ class ResourceManager(Manager):
         return self._graph
 
     @property
-    def sorted_nodes(self) -> list[ResourceGroup]:
+    def sorted_nodes(self):
         """Returns a topological sort of the resource graph.
 
         Notes
         -----
         Topological sorts are not stable. Be wary of depending on order
         where you shouldn't.
+
         """
         if self._sorted_nodes is None:
             try:
-                self._sorted_nodes = list(nx.algorithms.topological_sort(self.graph))  # type: ignore[func-returns-value]
+                self._sorted_nodes = list(nx.algorithms.topological_sort(self.graph))
             except nx.NetworkXUnfeasible:
                 raise ResourceError(
                     f"The resource pool contains at least one cycle: "
@@ -156,17 +152,13 @@ class ResourceManager(Manager):
                 )
         return self._sorted_nodes
 
-    def setup(self, builder: Builder) -> None:
-        self.logger = builder.logging.get_logger(self.name)
-
-    # TODO [MIC-5380]: Refactor add_resources for better type hinting
     def add_resources(
         self,
         resource_type: str,
-        resource_names: list[str],
+        resource_names: List[str],
         producer: Any,
-        dependencies: list[str],
-    ) -> None:
+        dependencies: List[str],
+    ):
         """Adds managed resources to the resource pool.
 
         Parameters
@@ -188,6 +180,7 @@ class ResourceManager(Manager):
             If either the resource type is invalid, a component has multiple
             resource producers for the ``column`` resource type, or
             there are multiple producers of the same resource.
+
         """
         if resource_type not in RESOURCE_TYPES:
             raise ResourceError(
@@ -211,15 +204,16 @@ class ResourceManager(Manager):
     def _get_resource_group(
         self,
         resource_type: str,
-        resource_names: list[str],
-        producer: Any,
-        dependencies: list[str],
+        resource_names: List[str],
+        producer: MethodType,
+        dependencies: List[str],
     ) -> ResourceGroup:
         """Packages resource information into a resource group.
 
         See Also
         --------
         :class:`ResourceGroup`
+
         """
         if not resource_names:
             # We have a "producer" that doesn't produce anything, but
@@ -245,6 +239,7 @@ class ResourceManager(Manager):
         between post setup time when the :class:`values manager
         <vivarium.framework.values.ValuesManager>` finalizes pipeline
         dependencies and population creation time.
+
         """
         resource_graph = nx.DiGraph()
         # networkx ignores duplicates
@@ -255,7 +250,7 @@ class ResourceManager(Manager):
                 if dependency not in self._resource_group_map:
                     # Warn here because this sometimes happens naturally
                     # if observer components are missing from a simulation.
-                    self.logger.warning(
+                    logger.warning(
                         f"Resource {dependency} is not provided by any component but is needed to "
                         f"compute {resource_group}."
                     )
@@ -265,12 +260,13 @@ class ResourceManager(Manager):
 
         return resource_graph
 
-    def __iter__(self) -> Iterator[Any]:
+    def __iter__(self) -> Iterable[MethodType]:
         """Returns a dependency-sorted iterable of population initializers.
 
         We exclude all non-initializer dependencies. They were necessary in
         graph construction, but we only need the column producers at population
         creation time.
+
         """
         return iter(
             [
@@ -280,7 +276,7 @@ class ResourceManager(Manager):
             ]
         )
 
-    def __repr__(self) -> str:
+    def __repr__(self):
         out = {}
         for resource_group in set(self._resource_group_map.values()):
             produced = ", ".join(resource_group)
@@ -288,7 +284,7 @@ class ResourceManager(Manager):
         return "\n".join([f"{produced} : {depends}" for produced, depends in out.items()])
 
 
-class ResourceInterface(Interface):
+class ResourceInterface:
     """The resource management system.
 
     A resource in :mod:`vivarium` is something like a state table column
@@ -312,10 +308,10 @@ class ResourceInterface(Interface):
     def add_resources(
         self,
         resource_type: str,
-        resource_names: list[str],
+        resource_names: List[str],
         producer: Any,
-        dependencies: list[str],
-    ) -> None:
+        dependencies: List[str],
+    ):
         """Adds managed resources to the resource pool.
 
         Parameters
@@ -337,14 +333,16 @@ class ResourceInterface(Interface):
             If either the resource type is invalid, a component has multiple
             resource producers for the ``column`` resource type, or
             there are multiple producers of the same resource.
+
         """
         self._manager.add_resources(resource_type, resource_names, producer, dependencies)
 
-    def __iter__(self) -> Iterator[Any]:
+    def __iter__(self):
         """Returns a dependency-sorted iterable of population initializers.
 
         We exclude all non-initializer dependencies. They were necessary in
         graph construction, but we only need the column producers at population
         creation time.
+
         """
         return iter(self._manager)

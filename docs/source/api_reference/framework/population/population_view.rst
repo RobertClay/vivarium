@@ -1,1 +1,0 @@
-.. automodule:: vivarium.framework.population.population_view

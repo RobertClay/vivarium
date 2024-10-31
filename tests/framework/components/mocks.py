@@ -1,40 +1,32 @@
-from typing import Any, Dict
-
-from vivarium import Component
-from vivarium.framework.engine import Builder
-from vivarium.framework.event import Event
-
-
-class MockComponentA(Component):
-    @property
-    def name(self) -> str:
-        return self._name
-
+class MockComponentA:
     def __init__(self, *args, name="mock_component_a"):
-        super().__init__()
-        self._name = name
+        self.name = name
         self.args = args
         self.builder_used_for_setup = None
 
-    def __eq__(self, other: Any) -> bool:
+    def __eq__(self, other):
         return type(self) == type(other) and self.name == other.name
 
 
-class MockComponentB(Component):
-    @property
-    def name(self) -> str:
-        return self._name
-
+class MockComponentB:
     def __init__(self, *args, name="mock_component_b"):
-        super().__init__()
         self._name = name
         self.args = args
         self.builder_used_for_setup = None
+        self._sub_components = []
         if len(self.args) > 1:
             for arg in self.args:
                 self._sub_components.append(MockComponentB(arg, name=arg))
 
-    def setup(self, builder: Builder) -> None:
+    @property
+    def name(self):
+        return self._name
+
+    @property
+    def sub_components(self):
+        return self._sub_components
+
+    def setup(self, builder):
         self.builder_used_for_setup = builder
         builder.value.register_value_modifier("metrics", self.metrics)
 
@@ -45,12 +37,13 @@ class MockComponentB(Component):
             metrics["test"] = 1
         return metrics
 
-    def __eq__(self, other: Any) -> bool:
+    def __eq__(self, other):
         return type(self) == type(other) and self.name == other.name
 
 
-class MockGenericComponent(Component):
-    CONFIGURATION_DEFAULTS = {
+class MockGenericComponent:
+
+    configuration_defaults = {
         "component": {
             "key1": "val",
             "key2": {
@@ -61,62 +54,59 @@ class MockGenericComponent(Component):
         }
     }
 
-    @property
-    def name(self) -> str:
-        return self._name
-
-    @property
-    def configuration_defaults(self) -> Dict[str, Any]:
-        return {self.name: self.CONFIGURATION_DEFAULTS["component"]}
-
-    def __init__(self, name: str):
-        super().__init__()
-        self._name = name
+    def __init__(self, name):
+        self.name = name
+        self.configuration_defaults = {
+            self.name: MockGenericComponent.configuration_defaults["component"]
+        }
         self.builder_used_for_setup = None
 
-    def setup(self, builder: Builder) -> None:
+    def setup(self, builder):
         self.builder_used_for_setup = builder
         self.config = builder.configuration[self.name]
 
-    def __eq__(self, other: Any) -> bool:
+    def __eq__(self, other):
         return type(self) == type(other) and self.name == other.name
+
+
+class NamelessComponent:
+    def __init__(self, *args):
+        self.args = args
 
 
 class Listener(MockComponentB):
     def __init__(self, *args, name="test_listener"):
         super().__init__(*args, name=name)
         self.post_setup_called = False
-        self.time_step_prepare_called = False
+        self.time_step__prepare_called = False
         self.time_step_called = False
-        self.time_step_cleanup_called = False
+        self.time_step__cleanup_called = False
         self.collect_metrics_called = False
         self.simulation_end_called = False
 
-        self.event_indexes = {
-            "time_step_prepare": None,
-            "time_step": None,
-            "time_step_cleanup": None,
-            "collect_metrics": None,
-        }
+    def setup(self, builder):
+        super().setup(builder)
+        builder.event.register_listener("post_setup", self.on_post_setup)
+        builder.event.register_listener("time_step__prepare", self.on_time_step__prepare)
+        builder.event.register_listener("time_step", self.on_time_step)
+        builder.event.register_listener("time_step__cleanup", self.on_time_step__cleanup)
+        builder.event.register_listener("collect_metrics", self.on_collect_metrics)
+        builder.event.register_listener("simulation_end", self.on_simulation_end)
 
-    def on_post_setup(self, event: Event) -> None:
+    def on_post_setup(self, _):
         self.post_setup_called = True
 
-    def on_time_step_prepare(self, event: Event) -> None:
-        self.time_step_prepare_called = True
-        self.event_indexes["time_step_prepare"] = event.index
+    def on_time_step__prepare(self, _):
+        self.time_step__prepare_called = True
 
-    def on_time_step(self, event: Event) -> None:
+    def on_time_step(self, _):
         self.time_step_called = True
-        self.event_indexes["time_step"] = event.index
 
-    def on_time_step_cleanup(self, event: Event) -> None:
-        self.time_step_cleanup_called = True
-        self.event_indexes["time_step_cleanup"] = event.index
+    def on_time_step__cleanup(self, _):
+        self.time_step__cleanup_called = True
 
-    def on_collect_metrics(self, event: Event) -> None:
+    def on_collect_metrics(self, _):
         self.collect_metrics_called = True
-        self.event_indexes["collect_metrics"] = event.index
 
-    def on_simulation_end(self, event: Event) -> None:
+    def on_simulation_end(self, _):
         self.simulation_end_called = True

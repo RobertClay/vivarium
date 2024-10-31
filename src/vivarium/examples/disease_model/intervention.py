@@ -1,50 +1,33 @@
-# mypy: ignore-errors
-from typing import Any, Dict
-
 import pandas as pd
 
-from vivarium import Component
 from vivarium.framework.engine import Builder
 
 
-class TreatmentIntervention(Component):
-    CONFIGURATION_DEFAULTS: Dict[str, Any] = {
+class TreatmentIntervention:
+
+    configuration_defaults = {
         "intervention": {
             "effect_size": 0.5,
         }
     }
 
-    ##############
-    # Properties #
-    ##############
-
-    @property
-    def configuration_defaults(self) -> Dict[str, Any]:
-        return {self.intervention: self.CONFIGURATION_DEFAULTS["intervention"]}
-
-    #####################
-    # Lifecycle methods #
-    #####################
-
-    def __init__(self, intervention: str, affected_value: str):
-        super().__init__()
-        self.intervention = intervention
+    def __init__(self, name: str, affected_value: str):
+        self.name = name
         self.affected_value = affected_value
+        self.configuration_defaults = {
+            name: TreatmentIntervention.configuration_defaults["intervention"]
+        }
 
     # noinspection PyAttributeOutsideInit
-    def setup(self, builder: Builder) -> None:
-        effect_size = builder.configuration[self.intervention].effect_size
+    def setup(self, builder: Builder):
+        effect_size = builder.configuration[self.name].effect_size
         builder.value.register_value_modifier(
             self.affected_value, modifier=self.intervention_effect
         )
         self.effect_size = builder.value.register_value_producer(
-            f"{self.intervention}.effect_size",
+            f"{self.name}.effect_size",
             source=lambda index: pd.Series(effect_size, index=index),
         )
 
-    ##################################
-    # Pipeline sources and modifiers #
-    ##################################
-
-    def intervention_effect(self, index: pd.Index, value: pd.Series) -> pd.Series:
+    def intervention_effect(self, index, value):
         return value * (1 - self.effect_size(index))

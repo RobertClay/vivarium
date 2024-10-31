@@ -2,40 +2,12 @@ from pathlib import Path
 
 import pytest
 import tables
-import yaml
-from _pytest.logging import LogCaptureFixture
-from loguru import logger
 
 from vivarium.framework.configuration import (
     build_model_specification,
     build_simulation_configuration,
 )
 from vivarium.testing_utilities import metadata
-
-
-def pytest_addoption(parser):
-    parser.addoption("--runslow", action="store_true", default=False, help="run slow tests")
-
-
-def pytest_configure(config):
-    config.addinivalue_line("markers", "slow: mark test as slow to run")
-
-
-def pytest_collection_modifyitems(config, items):
-    if config.getoption("--runslow"):
-        # --runslow given in cli: do not skip slow tests
-        return
-    skip_slow = pytest.mark.skip(reason="need --runslow option to run")
-    for item in items:
-        if "slow" in item.keywords:
-            item.add_marker(skip_slow)
-
-
-@pytest.fixture
-def caplog(caplog: LogCaptureFixture):
-    handler_id = logger.add(caplog.handler, format="{message}")
-    yield caplog
-    logger.remove(handler_id)
 
 
 @pytest.fixture
@@ -49,10 +21,9 @@ def base_config():
                 },
                 "end": {"year": 2010},
                 "step_size": 30.5,
-            },
-            "randomness": {"key_columns": ["entrance_time", "age"]},
+            }
         },
-        **metadata(__file__, layer="model_override"),
+        **metadata(__file__),
     )
     return config
 
@@ -79,31 +50,6 @@ def model_specification(mocker, test_spec, test_user_config):
     expand_user_mock = mocker.patch("vivarium.framework.configuration.Path.expanduser")
     expand_user_mock.return_value = test_user_config
     return build_model_specification(test_spec)
-
-
-@pytest.fixture
-def disease_model_spec(tmp_path):
-    model_spec_path = (
-        Path(__file__).resolve().parent.parent
-        / "src/vivarium/examples/disease_model/disease_model.yaml"
-    )
-    with open(model_spec_path, "r") as file:
-        ms = yaml.safe_load(file)
-
-    # modify the time so as not to take so long for a unit test
-    ms["configuration"]["time"]["end"]["year"] = ms["configuration"]["time"]["start"]["year"]
-    ms["configuration"]["time"]["end"]["month"] = ms["configuration"]["time"]["start"][
-        "month"
-    ]
-    ms["configuration"]["time"]["start"]["day"] = 1
-    ms["configuration"]["time"]["end"]["day"] = 5
-    ms["configuration"]["time"]["step_size"] = 0.5
-    model_spec = tmp_path / "disease_model.yaml"
-
-    with open(model_spec, "w") as file:
-        yaml.dump(ms, file)
-
-    return model_spec
 
 
 @pytest.fixture

@@ -1,35 +1,28 @@
-# mypy: ignore-errors
 import numpy as np
 import pandas as pd
 
-from vivarium import Component
-from vivarium.framework.engine import Builder
-from vivarium.framework.population import SimulantData
 
+class Population:
 
-class Population(Component):
-    ##############
-    # Properties #
-    ##############
     configuration_defaults = {
         "population": {
             "colors": ["red", "blue"],
         }
     }
-    columns_created = ["color", "entrance_time"]
 
-    #####################
-    # Lifecycle methods #
-    #####################
+    def __init__(self):
+        self.name = "population"
 
-    def setup(self, builder: Builder) -> None:
+    def setup(self, builder):
         self.colors = builder.configuration.population.colors
 
-    ########################
-    # Event-driven methods #
-    ########################
+        columns_created = ["color", "entrance_time"]
+        builder.population.initializes_simulants(
+            self.on_initialize_simulants, columns_created
+        )
+        self.population_view = builder.population.get_view(columns_created)
 
-    def on_initialize_simulants(self, pop_data: SimulantData) -> None:
+    def on_initialize_simulants(self, pop_data):
         new_population = pd.DataFrame(
             {
                 "color": np.random.choice(self.colors, len(pop_data.index)),

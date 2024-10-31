@@ -8,23 +8,12 @@ The Plugin Management System
    in the next PR. -J.C. 05/07/19
 
 """
-
-from __future__ import annotations
-
-from dataclasses import dataclass
-from typing import Any, Union
-
-from layered_config_tree.main import LayeredConfigTree
-
+from vivarium.config_tree import ConfigTree
 from vivarium.exceptions import VivariumError
-from vivarium.framework.utilities import import_by_path
-from vivarium.manager import Interface, Manager
+
+from .utilities import import_by_path
 
 _MANAGERS = {
-    "logging": {
-        "controller": "vivarium.framework.logging.LoggingManager",
-        "builder_interface": "vivarium.framework.logging.LoggingInterface",
-    },
     "lookup": {
         "controller": "vivarium.framework.lookup.LookupTableManager",
         "builder_interface": "vivarium.framework.lookup.LookupTableInterface",
@@ -49,7 +38,12 @@ _MANAGERS = {
         "controller": "vivarium.framework.resource.ResourceManager",
         "builder_interface": "vivarium.framework.resource.ResourceInterface",
     },
+    "results": {
+        "controller": "vivarium.framework.results.ResultsManager",
+        "builder_interface": "vivarium.framework.results.ResultsInterface",
+    },
 }
+
 DEFAULT_PLUGINS = {
     "plugins": {
         "required": {
@@ -73,20 +67,10 @@ DEFAULT_PLUGINS = {
                 "controller": "vivarium.framework.artifact.ArtifactManager",
                 "builder_interface": "vivarium.framework.artifact.ArtifactInterface",
             },
-            "results": {
-                "controller": "vivarium.framework.results.ResultsManager",
-                "builder_interface": "vivarium.framework.results.ResultsInterface",
-            },
         },
         "optional": {},
     }
 }
-
-
-@dataclass
-class PluginGroup:
-    controller: Manager
-    builder_interface: Interface | None
 
 
 class PluginConfigurationError(VivariumError):
@@ -95,59 +79,54 @@ class PluginConfigurationError(VivariumError):
     pass
 
 
-class PluginManager(Manager):
-    def __init__(
-        self,
-        plugin_configuration: (
-            dict[str, dict[str, dict[str, str]]] | LayeredConfigTree | None
-        ) = None,
-    ):
-        self._plugin_configuration = LayeredConfigTree(
-            DEFAULT_PLUGINS["plugins"], layers=["base", "override"]  # type: ignore [arg-type]
+class PluginManager:
+    def __init__(self, plugin_configuration=None):
+        self._plugin_configuration = ConfigTree(
+            DEFAULT_PLUGINS["plugins"], layers=["base", "override"]
         )
         self._plugin_configuration.update(plugin_configuration, source="initialization_args")
-        self._plugins: dict[str, PluginGroup] = {}
+        self._plugins = {}
 
-    def get_plugin(self, name: str) -> Manager:
+    def get_plugin(self, name):
         if name not in self._plugins:
             self._plugins[name] = self._get(name)
-        return self._plugins[name].controller
+        return self._plugins[name]["controller"]
 
-    def get_plugin_interface(self, name: str) -> Interface | None:
+    def get_plugin_interface(self, name):
         if name not in self._plugins:
             self._plugins[name] = self._get(name)
-        return self._plugins[name].builder_interface
+        return self._plugins[name]["builder_interface"]
 
-    def get_core_controllers(self) -> dict[str, Manager]:
+    def get_core_controllers(self):
         core_components = [
-            name for name in self._plugin_configuration["required"].keys()  # type: ignore [union-attr]
+            name for name in self._plugin_configuration["required"].keys()
         ] + list(_MANAGERS.keys())
         return {name: self.get_plugin(name) for name in core_components}
 
-    def get_core_interfaces(self) -> dict[str, Interface | None]:
+    def get_core_interfaces(self):
         core_components = [
-            name for name in self._plugin_configuration["required"].keys()  # type: ignore [union-attr]
+            name for name in self._plugin_configuration["required"].keys()
         ] + list(_MANAGERS.keys())
         return {name: self.get_plugin_interface(name) for name in core_components}
 
-    def get_optional_controllers(self) -> dict[str, Manager]:
+    def get_optional_controllers(self):
         return {
             name: self.get_plugin(name)
-            for name in self._plugin_configuration["optional"].keys()  # type: ignore [union-attr]
+            for name in self._plugin_configuration["optional"].keys()
         }
 
-    def get_optional_interfaces(self) -> dict[str, Interface | None]:
+    def get_optional_interfaces(self):
         return {
             name: self.get_plugin_interface(name)
-            for name in self._plugin_configuration["optional"].keys()  # type: ignore [union-attr]
+            for name in self._plugin_configuration["optional"].keys()
         }
 
-    def _get(self, name: str) -> PluginGroup:
+    def _get(self, name):
         if name not in self._plugins:
             self._plugins[name] = self._build_plugin(name)
         return self._plugins[name]
 
-    def _build_plugin(self, name: str) -> PluginGroup:
+    def _build_plugin(self, name):
         plugin = self._lookup(name)
 
         try:
@@ -167,17 +146,17 @@ class PluginManager(Manager):
         else:
             interface = None
 
-        return PluginGroup(controller=controller, builder_interface=interface)
+        return {"controller": controller, "builder_interface": interface}
 
-    def _lookup(self, name: str) -> dict[str, str]:
-        if name in self._plugin_configuration["required"]:  # type: ignore [operator]
-            return self._plugin_configuration["required"][name]  # type: ignore [call-overload, index, return-value]
-        elif name in self._plugin_configuration["optional"]:  # type: ignore [operator]
-            return self._plugin_configuration["optional"][name]  # type: ignore [call-overload, index, return-value]
+    def _lookup(self, name):
+        if name in self._plugin_configuration["required"]:
+            return self._plugin_configuration["required"][name]
+        elif name in self._plugin_configuration["optional"]:
+            return self._plugin_configuration["optional"][name]
         elif name in _MANAGERS:
             return _MANAGERS[name]
         else:
             raise PluginConfigurationError(f"Plugin {name} not found.")
 
-    def __repr__(self) -> str:
+    def __repr__(self):
         return "PluginManager()"
